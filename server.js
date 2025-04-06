@@ -1,96 +1,83 @@
-// server.js - Ponto de entrada principal do backend
-
 const express = require('express');
+const http = require('http');
+const WebSocket = require('ws');
 const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
-require('dotenv').config();
-
-const backtestRoutes = require('./src/routes/backtestRoutes');
-const strategyRoutes = require('./src/routes/strategyRoutes');
-const settingsRoutes = require('./src/routes/settingsRoutes');
-
-// Logger setup
 const logger = require('./src/utils/logger');
+const config = require('./src/config');
+const binanceService = require('./src/services/binanceService');
+const apiRoutes = require('./src/routes/apiRoutes');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = config.app.port || 3001;
 
 // Middleware
-app.use(helmet()); // Security headers
-app.use(cors({
-  origin: require('./src/config/appConfig').app.corsOrigin,
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(cors());
 app.use(express.json());
-app.use(morgan('combined')); // HTTP request logging
 
-// Routes
-app.use('/api/backtest', backtestRoutes);
-app.use('/api/strategies', strategyRoutes);
-app.use('/api/settings', settingsRoutes);
+// Create HTTP server
+const server = http.createServer(app);
 
-// Rota simples para verificar se o servidor está rodando
-app.get('/', (req, res) => {
-  res.send('Bot de Trading API está rodando! 🚀');
-});
+// Create WebSocket server
+const wss = new WebSocket.Server({ server });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  logger.error(`Error: ${err.message}`);
-  res.status(err.status || 500).json({
-    success: false,
-    error: err.message || 'Internal Server Error'
-  });
-});
+// Setup routes - Fix: Directly mounting routes instead of using a setup function
+app.use('/api', apiRoutes);
 
 // Start server
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
+  logger.info('Servidor WebSocket inicializado');
 });
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (error) => {
-  logger.error(`Unhandled Rejection: ${error.message}`, error);
+// Handle WebSocket connections
+wss.on('connection', (ws) => {
+  logger.info('Client connected');
+  
+  ws.on('message', (message) => {
+    try {
+      const data = JSON.parse(message);
+      logger.info('Received:', data);
+      
+      // Handle client commands here
+    } catch (error) {
+      logger.error('WebSocket message error:', error);
+    }
+  });
+  
+  ws.on('close', () => {
+    logger.info('Client disconnected');
+  });
 });
 
-// Tratamento de erros não capturados
-process.on('uncaughtException', (err) => {
-  logger.error('Erro não capturado:', err);
-});
-
-// Adiciona desligamento gracioso
-const gracefulShutdown = async () => {
+// Graceful shutdown handler
+function gracefulShutdown() {
   logger.info('Initiating graceful shutdown...');
   
-  // Fecha conexões WebSocket
-  const wss = require('./src/utils/webSocketServer').initWsServer(app);
-  wss.clients.forEach(client => {
-    client.terminate();
+  // First close WebSocket server
+  wss.close(() => {
+    logger.info('WebSocket server closed');
+    
+    // Then close HTTP server
+    server.close(() => {
+      logger.info('HTTP server closed');
+      process.exit(0);
+    });
   });
   
-  // Fecha servidor HTTP
-  app.close(async () => {
-    logger.info('Servidor HTTP fechado.');
-    
-    // Fecha conexão com o banco de dados, se habilitado
-    const config = require('./src/config/appConfig');
-    if (config.database.enabled) {
-      await require('./src/services/databaseService').connectDB.disconnect();
-    }
-    
-    process.exit(0);
-  });
-  
-  // Força saída após timeout
+  // If it takes too long, force exit
   setTimeout(() => {
-    logger.error('Não foi possível fechar conexões a tempo, encerrando forçadamente');
+    logger.error('Could not close connections in time, forcefully shutting down');
     process.exit(1);
-  }, 30000);
-};
+  }, 10000);
+}
 
+// Listen for termination signals
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
-module.exports = app;
+// Catch unhandled rejections
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Rejection:', reason);
+});
+
+module.exports = { app, server, wss };
