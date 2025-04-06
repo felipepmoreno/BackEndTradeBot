@@ -1,309 +1,132 @@
 // src/strategies/strategyManager.js
 
-const fs = require('fs').promises;
-const path = require('path');
+const GridTradingStrategy = require('./gridTrading');
 const logger = require('../utils/logger');
-const databaseService = require('../services/databaseService');
 
-// Cache de estratégias
-let strategies = [];
-let strategyClasses = {};
+// In-memory strategy storage (would use a database in production)
+const strategies = [];
+let nextId = 1;
+
+// Available strategy types
+const strategyTypes = [
+  {
+    id: 'GridTradingStrategy',
+    name: 'Grid Trading',
+    description: 'Creates a grid of buy and sell orders at regular intervals, ideal for sideways markets',
+    parameters: GridTradingStrategy.parameters || []
+  }
+];
+
+// Initialize with a sample strategy
+strategies.push({
+  id: String(nextId++),
+  name: 'BTC Grid Trading',
+  type: 'GridTradingStrategy', 
+  pair: 'BTCUSDT',
+  active: false,
+  config: {
+    upperLimit: 40000,
+    lowerLimit: 35000,
+    levels: 5,
+    totalInvestment: 1000,
+    profitPerGrid: 1,
+    useVolatilityAdjustment: true,
+    rebalanceGrid: false,
+    rebalanceInterval: 24
+  },
+  createdAt: new Date().toISOString()
+});
 
 /**
- * Inicializa e carrega todas as estratégias disponíveis
+ * Get all configured strategies
  */
-const loadStrategies = async () => {
-  logger.info('Carregando estratégias disponíveis');
-  
-  try {
-    // Carregar estratégias do diretório
-    const strategiesDir = path.join(__dirname);
-    const files = await fs.readdir(strategiesDir);
-    
-    // Filtrar apenas arquivos JS que não sejam este arquivo ou a classe base
-    const strategyFiles = files.filter(file => 
-      file.endsWith('.js') && 
-      file !== 'strategyManager.js' && 
-      file !== 'baseStrategy.js'
-    );
-    
-    // Carregar cada estratégia
-    for (const file of strategyFiles) {
-      const strategyName = path.basename(file, '.js');
-      try {
-        const StrategyClass = require(path.join(strategiesDir, file));
-        strategyClasses[strategyName] = StrategyClass;
-        logger.info(`Estratégia carregada: ${strategyName}`);
-      } catch (error) {
-        logger.error(`Erro ao carregar estratégia ${strategyName}:`, error);
-      }
-    }
-    
-    // Carregar configurações de estratégias do banco de dados ou arquivo de configuração
-    await loadStrategyConfigurations();
-    
-    return strategies;
-  } catch (error) {
-    logger.error('Erro ao carregar estratégias:', error);
-    return [];
-  }
-};
-
-/**
- * Carrega configurações de estratégias do banco de dados ou arquivo
- */
-const loadStrategyConfigurations = async () => {
-  try {
-    // Se um serviço de banco de dados está disponível, use-o
-    if (databaseService.isConnected()) {
-      const configs = await databaseService.getStrategyConfigurations();
-      strategies = await instantiateStrategies(configs);
-    } else {
-      // Caso contrário, carregue de um arquivo JSON
-      const configPath = path.join(__dirname, '../config/strategies.json');
-      const configData = await fs.readFile(configPath, 'utf8');
-      const configs = JSON.parse(configData);
-      strategies = await instantiateStrategies(configs);
-    }
-    
-    logger.info(`${strategies.length} configurações de estratégia carregadas`);
-  } catch (error) {
-    logger.error('Erro ao carregar configurações de estratégias:', error);
-    strategies = [];
-  }
-  
+exports.getStrategies = async () => {
   return strategies;
 };
 
 /**
- * Instancia objetos de estratégia a partir das configurações
- * @param {Array} configs - Configurações de estratégias
- * @returns {Array} - Instâncias de estratégias
+ * Get a strategy by ID
  */
-const instantiateStrategies = async (configs) => {
-  const instances = [];
-  
-  for (const config of configs) {
-    try {
-      const { type, ...strategyConfig } = config;
-      
-      // Verificar se a classe da estratégia existe
-      if (!strategyClasses[type]) {
-        logger.warn(`Tipo de estratégia não encontrado: ${type}`);
-        continue;
-      }
-      
-      // Instanciar a estratégia
-      const strategy = new strategyClasses[type](strategyConfig);
-      await strategy.init();
-      
-      instances.push(strategy);
-    } catch (error) {
-      logger.error(`Erro ao instanciar estratégia ${config.type} (${config.id}):`, error);
-    }
-  }
-  
-  return instances;
+exports.getStrategyById = async (id) => {
+  return strategies.find(strategy => strategy.id === id) || null;
 };
 
 /**
- * Salva configuração de estratégia
- * @param {Object} config - Configuração da estratégia
+ * Save a strategy configuration (create or update)
  */
-const saveStrategyConfiguration = async (config) => {
+exports.saveStrategyConfiguration = async (config) => {
   try {
-    // Validar configuração
-    if (!config.id || !config.type || !config.name || !config.pair) {
-      throw new Error('Configuração de estratégia inválida');
-    }
+    const strategyType = strategyTypes.find(type => type.id === config.type);
     
-    // Salvar no banco de dados ou arquivo
-    if (databaseService.isConnected()) {
-      await databaseService.saveStrategyConfiguration(config);
+    if (!strategyType) {
+      return { success: false, error: 'Invalid strategy type' };
+    }
+
+    const existingIndex = strategies.findIndex(s => s.id === config.id);
+    
+    if (existingIndex >= 0) {
+      // Update
+      strategies[existingIndex] = {
+        ...strategies[existingIndex],
+        ...config,
+        updatedAt: new Date().toISOString()
+      };
+      return { success: true, strategy: strategies[existingIndex] };
     } else {
-      // Carregar configurações existentes
-      const configPath = path.join(__dirname, '../config/strategies.json');
-      let configs = [];
-      
-      try {
-        const configData = await fs.readFile(configPath, 'utf8');
-        configs = JSON.parse(configData);
-      } catch (error) {
-        // Arquivo não existe, criar um novo array
-        configs = [];
-      }
-      
-      // Atualizar ou adicionar configuração
-      const index = configs.findIndex(c => c.id === config.id);
-      if (index >= 0) {
-        configs[index] = config;
-      } else {
-        configs.push(config);
-      }
-      
-      // Salvar no arquivo
-      await fs.writeFile(configPath, JSON.stringify(configs, null, 2), 'utf8');
+      // Create
+      const newStrategy = {
+        ...config,
+        id: String(nextId++),
+        createdAt: new Date().toISOString()
+      };
+      strategies.push(newStrategy);
+      return { success: true, strategy: newStrategy };
     }
-    
-    // Recarregar estratégias
-    await loadStrategyConfigurations();
-    
-    logger.info(`Configuração de estratégia salva: ${config.name} (${config.id})`);
-    return true;
   } catch (error) {
-    logger.error('Erro ao salvar configuração de estratégia:', error);
-    return false;
+    logger.error('Error saving strategy configuration:', error);
+    return { success: false, error: error.message };
   }
 };
 
 /**
- * Remove configuração de estratégia
- * @param {string} strategyId - ID da estratégia
+ * Remove a strategy configuration
  */
-const removeStrategyConfiguration = async (strategyId) => {
+exports.removeStrategyConfiguration = async (id) => {
   try {
-    // Remover do banco de dados ou arquivo
-    if (databaseService.isConnected()) {
-      await databaseService.removeStrategyConfiguration(strategyId);
-    } else {
-      // Carregar configurações existentes
-      const configPath = path.join(__dirname, '../config/strategies.json');
-      let configs = [];
-      
-      try {
-        const configData = await fs.readFile(configPath, 'utf8');
-        configs = JSON.parse(configData);
-      } catch (error) {
-        logger.error('Erro ao ler arquivo de configurações:', error);
-        return false;
-      }
-      
-      // Filtrar a configuração a ser removida
-      configs = configs.filter(c => c.id !== strategyId);
-      
-      // Salvar no arquivo
-      await fs.writeFile(configPath, JSON.stringify(configs, null, 2), 'utf8');
+    const index = strategies.findIndex(strategy => strategy.id === id);
+    if (index === -1) {
+      return { success: false, error: 'Strategy not found' };
     }
     
-    // Recarregar estratégias
-    await loadStrategyConfigurations();
-    
-    logger.info(`Configuração de estratégia removida: ${strategyId}`);
-    return true;
+    strategies.splice(index, 1);
+    return { success: true };
   } catch (error) {
-    logger.error('Erro ao remover configuração de estratégia:', error);
-    return false;
+    logger.error('Error removing strategy configuration:', error);
+    return { success: false, error: error.message };
   }
 };
 
 /**
- * Ativar ou desativar uma estratégia
- * @param {string} strategyId - ID da estratégia
- * @param {boolean} active - Estado de ativação
+ * Get available strategy types
  */
-const setStrategyActive = async (strategyId, active) => {
+exports.getStrategyTypes = async () => {
+  return strategyTypes;
+};
+
+/**
+ * Set strategy active status
+ */
+exports.setStrategyActive = async (id, active) => {
   try {
-    // Encontrar a configuração
-    const strategy = strategies.find(s => s.id === strategyId);
-    
+    const strategy = strategies.find(s => s.id === id);
     if (!strategy) {
-      logger.warn(`Estratégia não encontrada: ${strategyId}`);
-      return false;
+      return { success: false, error: 'Strategy not found' };
     }
     
-    // Atualizar estado de ativação
-    strategy.config.active = active;
-    
-    // Salvar alteração
-    await saveStrategyConfiguration(strategy.config);
-    
-    logger.info(`Estratégia ${strategyId} ${active ? 'ativada' : 'desativada'}`);
-    return true;
+    strategy.active = active;
+    return { success: true, strategy };
   } catch (error) {
-    logger.error('Erro ao modificar estado de ativação da estratégia:', error);
-    return false;
+    logger.error('Error setting strategy active status:', error);
+    return { success: false, error: error.message };
   }
-};
-
-/**
- * Retorna todas as estratégias disponíveis
- * @returns {Array} Lista de estratégias
- */
-const getStrategies = async () => {
-  if (strategies.length === 0) {
-    await loadStrategies();
-  }
-  return strategies;
-};
-
-/**
- * Retorna apenas estratégias ativas
- * @returns {Array} Lista de estratégias ativas
- */
-const getActiveStrategies = async () => {
-  const allStrategies = await getStrategies();
-  return allStrategies.filter(strategy => strategy.config.active);
-};
-
-/**
- * Retorna uma estratégia específica pelo ID
- * @param {string} strategyId - ID da estratégia
- * @returns {Object} Estratégia
- */
-const getStrategyById = async (strategyId) => {
-  const allStrategies = await getStrategies();
-  return allStrategies.find(strategy => strategy.id === strategyId);
-};
-
-/**
- * Retorna todos os tipos de estratégias disponíveis
- * @returns {Array} Lista de tipos de estratégias
- */
-const getStrategyTypes = () => {
-  return Object.keys(strategyClasses).map(type => ({
-    type,
-    name: strategyClasses[type].displayName || type,
-    description: strategyClasses[type].description || '',
-    parameters: strategyClasses[type].parameters || []
-  }));
-};
-
-/**
- * Cria uma nova instância de estratégia para backtesting
- * @param {Object} config - Configuração da estratégia
- * @returns {Object} Instância da estratégia
- */
-const createBacktestStrategy = async (config) => {
-  try {
-    const { type, ...strategyConfig } = config;
-    
-    // Verificar se a classe da estratégia existe
-    if (!strategyClasses[type]) {
-      throw new Error(`Tipo de estratégia não encontrado: ${type}`);
-    }
-    
-    // Instanciar a estratégia com modo de backtesting
-    const strategy = new strategyClasses[type]({
-      ...strategyConfig,
-      backtesting: true
-    });
-    
-    await strategy.init();
-    return strategy;
-  } catch (error) {
-    logger.error('Erro ao criar estratégia para backtesting:', error);
-    throw error;
-  }
-};
-
-module.exports = {
-  loadStrategies,
-  getStrategies,
-  getActiveStrategies,
-  getStrategyById,
-  getStrategyTypes,
-  saveStrategyConfiguration,
-  removeStrategyConfiguration,
-  setStrategyActive,
-  createBacktestStrategy
 };

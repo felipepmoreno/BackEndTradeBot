@@ -1,41 +1,22 @@
 const express = require('express');
 const router = express.Router();
+const strategyController = require('../controllers/strategyController');
+const dashboardController = require('../controllers/dashboardController');
+const botController = require('../controllers/botController');
 
-// Import route modules
-const apiRoutes = require('./apiRoutes');
+// Dashboard routes
+router.get('/dashboard', dashboardController.getDashboardData);
 
-// Note: If these routes don't exist yet, create basic placeholder exports for them
-let strategyRoutes;
-let backtestRoutes;
-let settingsRoutes;
+// Bot status routes
+router.get('/bot/status', botController.getBotStatus);
+router.post('/bot/toggle', botController.toggleBot);
 
-try {
-  strategyRoutes = require('./strategyRoutes');
-} catch (err) {
-  strategyRoutes = express.Router();
-}
-
-try {
-  backtestRoutes = require('./backtestRoutes');
-} catch (err) {
-  backtestRoutes = express.Router();
-}
-
-try {
-  settingsRoutes = require('./settingsRoutes');
-} catch (err) {
-  settingsRoutes = express.Router();
-}
-
-// Mount routes
-router.use('/v1', apiRoutes);
-router.use('/strategies', strategyRoutes);
-router.use('/backtest', backtestRoutes);
-router.use('/settings', settingsRoutes);
-
-// Add a basic health check route
-router.get('/health', (req, res) => {
-  res.status(200).json({ status: 'UP', timestamp: new Date() });
-});
+// Strategy routes
+router.get('/strategies', strategyController.getStrategies);
+router.get('/strategies/:id', strategyController.getStrategyById);
+router.post('/strategies', strategyController.createStrategy);
+router.put('/strategies/:id', strategyController.updateStrategy);
+router.delete('/strategies/:id', strategyController.deleteStrategy);
+router.get('/strategies/types/all', strategyController.getStrategyTypes);
 
 module.exports = router;
