@@ -11,6 +11,7 @@ const config = {
     apiKey: process.env.BINANCE_API_KEY,
     apiSecret: process.env.BINANCE_API_SECRET,
     testMode: process.env.TEST_MODE === 'true',
+    useTestnet: process.env.USE_BINANCE_TESTNET === 'true',
     rateLimit: parseInt(process.env.RATE_LIMIT) || 10,
     rateLimitWindow: parseInt(process.env.RATE_LIMIT_WINDOW) || 1000
   },

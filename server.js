@@ -1,80 +1,63 @@
 // server.js - Ponto de entrada principal do backend
 
 const express = require('express');
-const http = require('http');
-const WebSocket = require('ws');
 const cors = require('cors');
-const dotenv = require('dotenv');
-const config = require('./src/config/appConfig');
-const { connectDB } = require('./src/services/databaseService');
-const routes = require('./src/api/routes');
-const { initWsServer } = require('./src/utils/webSocketServer');
-const { initTradingEngine } = require('./src/core/tradingEngine');
+const helmet = require('helmet');
+const morgan = require('morgan');
+require('dotenv').config();
+
+const backtestRoutes = require('./src/routes/backtestRoutes');
+const strategyRoutes = require('./src/routes/strategyRoutes');
+const settingsRoutes = require('./src/routes/settingsRoutes');
+
+// Logger setup
 const logger = require('./src/utils/logger');
 
-// Carrega variáveis de ambiente
-dotenv.config();
-
-// Inicializa o app Express
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middlewares
-// Configurar CORS para permitir conexões do frontend
+// Middleware
+app.use(helmet()); // Security headers
 app.use(cors({
-  origin: config.app.corsOrigin,
+  origin: require('./src/config/appConfig').app.corsOrigin,
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
+app.use(morgan('combined')); // HTTP request logging
 
-// Rotas API
-app.use('/api', routes);
+// Routes
+app.use('/api/backtest', backtestRoutes);
+app.use('/api/strategies', strategyRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Rota simples para verificar se o servidor está rodando
 app.get('/', (req, res) => {
   res.send('Bot de Trading API está rodando! 🚀');
 });
 
-// Cria o servidor HTTP
-const server = http.createServer(app);
+// Error handling middleware
+app.use((err, req, res, next) => {
+  logger.error(`Error: ${err.message}`);
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || 'Internal Server Error'
+  });
+});
 
-// Inicializa o servidor WebSocket
-const wss = initWsServer(server);
+// Start server
+app.listen(PORT, () => {
+  logger.info(`Server running on port ${PORT}`);
+});
 
-// Inicializa o banco de dados (se configurado)
-if (process.env.USE_DATABASE === 'true') {
-  connectDB()
-    .then(() => logger.info('Conexão com o banco de dados estabelecida'))
-    .catch(err => {
-      logger.error('Erro ao conectar com o banco de dados:', err);
-      process.exit(1);
-    });
-}
-
-// Inicia o servidor
-server.listen(PORT, () => {
-  logger.info(`Servidor rodando na porta ${PORT}`);
-  
-  // Inicia o motor de trading após o servidor estar pronto
-  initTradingEngine(wss)
-    .then(() => {
-      logger.info('Motor de trading inicializado com sucesso');
-    })
-    .catch(err => {
-      logger.error('Erro ao inicializar o motor de trading:', err);
-    });
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (error) => {
+  logger.error(`Unhandled Rejection: ${error.message}`, error);
 });
 
 // Tratamento de erros não capturados
 process.on('uncaughtException', (err) => {
   logger.error('Erro não capturado:', err);
-  // Em um ambiente de produção, você poderia querer notificar administradores
-  // e reiniciar o processo graciosamente
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Rejeição não tratada em:', promise, 'razão:', reason);
 });
 
 // Adiciona desligamento gracioso
@@ -82,17 +65,19 @@ const gracefulShutdown = async () => {
   logger.info('Initiating graceful shutdown...');
   
   // Fecha conexões WebSocket
+  const wss = require('./src/utils/webSocketServer').initWsServer(app);
   wss.clients.forEach(client => {
     client.terminate();
   });
   
   // Fecha servidor HTTP
-  server.close(async () => {
+  app.close(async () => {
     logger.info('Servidor HTTP fechado.');
     
     // Fecha conexão com o banco de dados, se habilitado
+    const config = require('./src/config/appConfig');
     if (config.database.enabled) {
-      await connectDB.disconnect();
+      await require('./src/services/databaseService').connectDB.disconnect();
     }
     
     process.exit(0);
@@ -107,3 +92,5 @@ const gracefulShutdown = async () => {
 
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
+
+module.exports = app;

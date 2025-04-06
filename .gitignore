@@ -1,3 +1,87 @@
 Documentação Geral do Projeto/Estratégias Recomendadas para Implementação da Função Trading.txt
 Documentação Geral do Projeto/Estrutura do projeto.txt
-logs/*
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build / output directories
+dist/
+build/
+out/
+
+# Environment variables and configuration
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+config/local*.js
+config/secrets.js
+
+# API credentials and sensitive data
+*credentials*
+*apikey*
+*secret*
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Database files
+*.sqlite
+*.db
+data/
+
+# Testing
+coverage/
+.nyc_output/
+test-results/
+
+# Cache and temporary files
+.cache/
+.temp/
+.tmp/
+tmp/
+
+# Backup files
+*.bak
+*.swp
+*~
+.DS_Store
+
+# Trading specific files
+backtest-results/
+historical-data/
+downloads/
+*.csv
+*.xlsx
+*.xls
+
+# IDE specific files
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
+*.sublime-*
+*.code-workspace
+
+# OS specific
+Thumbs.db
+.DS_Store
+Desktop.ini
+
+# Debugging
+.node_repl_history
+.npm
