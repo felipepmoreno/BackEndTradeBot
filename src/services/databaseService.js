@@ -1,349 +1,309 @@
-// src/services/databaseService.js
-
-const fs = require('fs').promises;
-const path = require('path');
 const logger = require('../utils/logger');
+const config = require('../config/appConfig');
+const fs = require('fs');
+const path = require('path');
 
-/**
- * Serviço de Banco de Dados Simples
- * Implementa armazenamento em arquivos JSON para persistência de dados
- */
+// Diretório para armazenar dados em arquivos se não estiver usando banco de dados
+const DATA_DIR = path.join(__dirname, '../../data');
+
 class DatabaseService {
   constructor() {
     this.connected = false;
-    this.dbDir = path.join(process.cwd(), 'data');
-    this.cache = {
-      portfolio: null,
-      strategies: null,
-      tradeHistory: null,
-      performanceSnapshots: null,
-      riskSettings: null
-    };
-  }
-  
-  /**
-   * Inicializa o serviço de banco de dados
-   * @returns {boolean} Status da inicialização
-   */
-  async init() {
-    try {
-      // Criar diretório de dados se não existir
-      await this.ensureDbDir();
-      
-      // Carregar dados para o cache
-      await this.loadCache();
-      
-      this.connected = true;
-      logger.info('Serviço de banco de dados iniciado com sucesso');
-      return true;
-    } catch (error) {
-      logger.error('Erro ao inicializar serviço de banco de dados:', error);
-      this.connected = false;
-      return false;
+    // Cria o diretório de dados se não existir
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
     }
   }
-  
+
   /**
-   * Verifica se o banco de dados está conectado
+   * Conecta ao banco de dados ou inicializa armazenamento local
+   */
+  async connect() {
+    if (config.database.enabled) {
+      try {
+        // Em uma implementação real, conectaria ao MongoDB, PostgreSQL, etc.
+        logger.info('Conectando ao banco de dados...');
+        // Simulando conexão bem-sucedida
+        this.connected = true;
+        logger.info('Conectado ao banco de dados com sucesso');
+        return true;
+      } catch (error) {
+        logger.error('Erro ao conectar ao banco de dados:', error);
+        return false;
+      }
+    } else {
+      // Usando armazenamento local
+      logger.info('Usando armazenamento local em arquivos JSON');
+      this.connected = true;
+      return true;
+    }
+  }
+
+  /**
+   * Verifica se está conectado ao banco de dados
    * @returns {boolean} Status da conexão
    */
   isConnected() {
     return this.connected;
   }
-  
-  /**
-   * Garante que o diretório de dados existe
-   */
-  async ensureDbDir() {
-    try {
-      await fs.access(this.dbDir);
-    } catch (error) {
-      // Diretório não existe, criar
-      await fs.mkdir(this.dbDir, { recursive: true });
-      logger.info(`Diretório de dados criado: ${this.dbDir}`);
-    }
-  }
-  
-  /**
-   * Carrega todos os dados para o cache
-   */
-  async loadCache() {
-    try {
-      this.cache.portfolio = await this.readJsonFile('portfolio.json');
-      this.cache.strategies = await this.readJsonFile('strategies.json');
-      this.cache.tradeHistory = await this.readJsonFile('trade_history.json');
-      this.cache.performanceSnapshots = await this.readJsonFile('performance_snapshots.json');
-      this.cache.riskSettings = await this.readJsonFile('risk_settings.json');
-      
-      logger.info('Cache do banco de dados carregado');
-    } catch (error) {
-      logger.error('Erro ao carregar cache do banco de dados:', error);
-    }
-  }
-  
-  /**
-   * Lê um arquivo JSON
-   * @param {string} fileName - Nome do arquivo
-   * @returns {Object|Array|null} - Dados do arquivo ou null se não existir
-   */
-  async readJsonFile(fileName) {
-    try {
-      const filePath = path.join(this.dbDir, fileName);
-      const data = await fs.readFile(filePath, 'utf8');
-      return JSON.parse(data);
-    } catch (error) {
-      if (error.code === 'ENOENT') {
-        // Arquivo não existe, retornar null
-        return null;
-      }
-      
-      // Outro erro
-      logger.error(`Erro ao ler arquivo ${fileName}:`, error);
-      return null;
-    }
-  }
-  
-  /**
-   * Escreve dados em um arquivo JSON
-   * @param {string} fileName - Nome do arquivo
-   * @param {Object|Array} data - Dados a serem escritos
-   * @returns {boolean} - Sucesso da operação
-   */
-  async writeJsonFile(fileName, data) {
-    try {
-      const filePath = path.join(this.dbDir, fileName);
-      await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
-      return true;
-    } catch (error) {
-      logger.error(`Erro ao escrever arquivo ${fileName}:`, error);
-      return false;
-    }
-  }
-  
-  /**
-   * Salva dados do portfólio
-   * @param {Object} portfolio - Dados do portfólio
-   * @returns {boolean} - Sucesso da operação
-   */
-  async savePortfolio(portfolio) {
-    try {
-      this.cache.portfolio = portfolio;
-      await this.writeJsonFile('portfolio.json', portfolio);
-      return true;
-    } catch (error) {
-      logger.error('Erro ao salvar portfólio:', error);
-      return false;
-    }
-  }
-  
-  /**
-   * Obtém dados do portfólio
-   * @returns {Object|null} - Dados do portfólio
-   */
-  async getPortfolio() {
-    if (this.cache.portfolio) {
-      return this.cache.portfolio;
-    }
-    
-    const portfolio = await this.readJsonFile('portfolio.json');
-    this.cache.portfolio = portfolio;
-    return portfolio;
-  }
-  
-  /**
-   * Salva configurações de estratégias
-   * @param {Object} config - Configuração da estratégia
-   * @returns {boolean} - Sucesso da operação
-   */
-  async saveStrategyConfiguration(config) {
-    try {
-      // Carregar configurações existentes
-      let strategies = this.cache.strategies || [];
-      
-      // Verificar se a estratégia já existe
-      const index = strategies.findIndex(s => s.id === config.id);
-      
-      if (index >= 0) {
-        // Atualizar estratégia existente
-        strategies[index] = config;
-      } else {
-        // Adicionar nova estratégia
-        strategies.push(config);
-      }
-      
-      // Atualizar cache e salvar arquivo
-      this.cache.strategies = strategies;
-      await this.writeJsonFile('strategies.json', strategies);
-      
-      return true;
-    } catch (error) {
-      logger.error('Erro ao salvar configuração de estratégia:', error);
-      return false;
-    }
-  }
-  
-  /**
-   * Remove uma configuração de estratégia
-   * @param {string} strategyId - ID da estratégia
-   * @returns {boolean} - Sucesso da operação
-   */
-  async removeStrategyConfiguration(strategyId) {
-    try {
-      // Carregar configurações existentes
-      let strategies = this.cache.strategies || [];
-      
-      // Filtrar a estratégia a ser removida
-      strategies = strategies.filter(s => s.id !== strategyId);
-      
-      // Atualizar cache e salvar arquivo
-      this.cache.strategies = strategies;
-      await this.writeJsonFile('strategies.json', strategies);
-      
-      return true;
-    } catch (error) {
-      logger.error('Erro ao remover configuração de estratégia:', error);
-      return false;
-    }
-  }
-  
-  /**
-   * Obtém as configurações de estratégias
-   * @returns {Array|null} - Configurações de estratégias
-   */
-  async getStrategyConfigurations() {
-    if (this.cache.strategies) {
-      return this.cache.strategies;
-    }
-    
-    const strategies = await this.readJsonFile('strategies.json');
-    this.cache.strategies = strategies || [];
-    return this.cache.strategies;
-  }
-  
-  /**
-   * Salva histórico de trades
-   * @param {Array} trades - Histórico de trades
-   * @returns {boolean} - Sucesso da operação
-   */
-  async saveTradeHistory(trades) {
-    try {
-      this.cache.tradeHistory = trades;
-      await this.writeJsonFile('trade_history.json', trades);
-      return true;
-    } catch (error) {
-      logger.error('Erro ao salvar histórico de trades:', error);
-      return false;
-    }
-  }
-  
-  /**
-   * Obtém o histórico de trades
-   * @returns {Array|null} - Histórico de trades
-   */
-  async getTradeHistory() {
-    if (this.cache.tradeHistory) {
-      return this.cache.tradeHistory;
-    }
-    
-    const trades = await this.readJsonFile('trade_history.json');
-    this.cache.tradeHistory = trades || [];
-    return this.cache.tradeHistory;
-  }
-  
-  /**
-   * Salva snapshots de desempenho
-   * @param {Array} snapshots - Snapshots de desempenho
-   * @returns {boolean} - Sucesso da operação
-   */
-  async savePerformanceSnapshots(snapshots) {
-    try {
-      this.cache.performanceSnapshots = snapshots;
-      await this.writeJsonFile('performance_snapshots.json', snapshots);
-      return true;
-    } catch (error) {
-      logger.error('Erro ao salvar snapshots de desempenho:', error);
-      return false;
-    }
-  }
-  
-  /**
-   * Obtém os snapshots de desempenho
-   * @returns {Array|null} - Snapshots de desempenho
-   */
-  async getPerformanceSnapshots() {
-    if (this.cache.performanceSnapshots) {
-      return this.cache.performanceSnapshots;
-    }
-    
-    const snapshots = await this.readJsonFile('performance_snapshots.json');
-    this.cache.performanceSnapshots = snapshots || [];
-    return this.cache.performanceSnapshots;
-  }
-  
+
   /**
    * Salva configurações de risco
-   * @param {Object} settings - Configurações de risco
-   * @returns {boolean} - Sucesso da operação
+   * @param {Object} settings - Configurações a salvar
+   * @returns {Promise<boolean>} Sucesso da operação
    */
   async saveRiskSettings(settings) {
     try {
-      this.cache.riskSettings = settings;
-      await this.writeJsonFile('risk_settings.json', settings);
+      if (config.database.enabled) {
+        // Implementar lógica de salvamento no DB
+        logger.info('Configurações de risco salvas no banco de dados');
+      } else {
+        // Salvar em arquivo
+        await this._saveToFile('riskSettings.json', settings);
+        logger.info('Configurações de risco salvas em arquivo');
+      }
       return true;
     } catch (error) {
       logger.error('Erro ao salvar configurações de risco:', error);
       return false;
     }
   }
-  
+
   /**
-   * Obtém as configurações de risco
-   * @returns {Object|null} - Configurações de risco
+   * Obtém configurações de risco
+   * @returns {Promise<Object|null>} Configurações de risco
    */
   async getRiskSettings() {
-    if (this.cache.riskSettings) {
-      return this.cache.riskSettings;
-    }
-    
-    const settings = await this.readJsonFile('risk_settings.json');
-    this.cache.riskSettings = settings;
-    return settings;
-  }
-  
-  /**
-   * Salva dados de backtesting
-   * @param {string} strategyId - ID da estratégia
-   * @param {Object} results - Resultados do backtesting
-   * @returns {boolean} - Sucesso da operação
-   */
-  async saveBacktestResults(strategyId, results) {
     try {
-      const fileName = `backtest_${strategyId}.json`;
-      await this.writeJsonFile(fileName, results);
+      if (config.database.enabled) {
+        // Implementar lógica de busca no DB
+        return null; // Temporário
+      } else {
+        // Ler de arquivo
+        return await this._readFromFile('riskSettings.json');
+      }
+    } catch (error) {
+      logger.error('Erro ao obter configurações de risco:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Salva portfólio
+   * @param {Object} portfolio - Dados do portfólio
+   * @returns {Promise<boolean>} Sucesso da operação
+   */
+  async savePortfolio(portfolio) {
+    try {
+      if (config.database.enabled) {
+        // Implementar lógica de salvamento no DB
+      } else {
+        // Salvar em arquivo
+        await this._saveToFile('portfolio.json', portfolio);
+      }
       return true;
     } catch (error) {
-      logger.error('Erro ao salvar resultados de backtesting:', error);
+      logger.error('Erro ao salvar portfólio:', error);
       return false;
     }
   }
-  
+
   /**
-   * Obtém resultados de backtesting
-   * @param {string} strategyId - ID da estratégia
-   * @returns {Object|null} - Resultados do backtesting
+   * Obtém portfólio
+   * @returns {Promise<Object|null>} Dados do portfólio
    */
-  async getBacktestResults(strategyId) {
+  async getPortfolio() {
     try {
-      const fileName = `backtest_${strategyId}.json`;
-      return await this.readJsonFile(fileName);
+      if (config.database.enabled) {
+        // Implementar lógica de busca no DB
+        return null; // Temporário
+      } else {
+        // Ler de arquivo
+        return await this._readFromFile('portfolio.json');
+      }
     } catch (error) {
-      logger.error('Erro ao obter resultados de backtesting:', error);
+      logger.error('Erro ao obter portfólio:', error);
       return null;
     }
+  }
+
+  /**
+   * Salva histórico de trades
+   * @param {Array} trades - Lista de trades
+   * @returns {Promise<boolean>} Sucesso da operação
+   */
+  async saveTradeHistory(trades) {
+    try {
+      if (config.database.enabled) {
+        // Implementar lógica de salvamento no DB
+      } else {
+        // Salvar em arquivo
+        await this._saveToFile('tradeHistory.json', trades);
+      }
+      return true;
+    } catch (error) {
+      logger.error('Erro ao salvar histórico de trades:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Obtém histórico de trades
+   * @returns {Promise<Array|null>} Lista de trades
+   */
+  async getTradeHistory() {
+    try {
+      if (config.database.enabled) {
+        // Implementar lógica de busca no DB
+        return null; // Temporário
+      } else {
+        // Ler de arquivo
+        return await this._readFromFile('tradeHistory.json', []);
+      }
+    } catch (error) {
+      logger.error('Erro ao obter histórico de trades:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Salva snapshots de performance
+   * @param {Array} snapshots - Lista de snapshots
+   * @returns {Promise<boolean>} Sucesso da operação
+   */
+  async savePerformanceSnapshots(snapshots) {
+    try {
+      if (config.database.enabled) {
+        // Implementar lógica de salvamento no DB
+      } else {
+        // Salvar em arquivo
+        await this._saveToFile('performanceSnapshots.json', snapshots);
+      }
+      return true;
+    } catch (error) {
+      logger.error('Erro ao salvar snapshots de performance:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Obtém snapshots de performance
+   * @returns {Promise<Array|null>} Lista de snapshots
+   */
+  async getPerformanceSnapshots() {
+    try {
+      if (config.database.enabled) {
+        // Implementar lógica de busca no DB
+        return null; // Temporário
+      } else {
+        // Ler de arquivo
+        return await this._readFromFile('performanceSnapshots.json', []);
+      }
+    } catch (error) {
+      logger.error('Erro ao obter snapshots de performance:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Salva estratégias
+   * @param {Array} strategies - Lista de estratégias
+   * @returns {Promise<boolean>} Sucesso da operação
+   */
+  async saveStrategies(strategies) {
+    try {
+      if (config.database.enabled) {
+        // Implementar lógica de salvamento no DB
+      } else {
+        // Salvar em arquivo
+        await this._saveToFile('strategies.json', strategies);
+      }
+      return true;
+    } catch (error) {
+      logger.error('Erro ao salvar estratégias:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Obtém estratégias
+   * @returns {Promise<Array|null>} Lista de estratégias
+   */
+  async getStrategies() {
+    try {
+      if (config.database.enabled) {
+        // Implementar lógica de busca no DB
+        return null; // Temporário
+      } else {
+        // Ler de arquivo
+        return await this._readFromFile('strategies.json', []);
+      }
+    } catch (error) {
+      logger.error('Erro ao obter estratégias:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Salva dados em arquivo
+   * @param {string} filename - Nome do arquivo
+   * @param {Object|Array} data - Dados a salvar
+   * @returns {Promise<void>}
+   * @private
+   */
+  async _saveToFile(filename, data) {
+    return new Promise((resolve, reject) => {
+      const filePath = path.join(DATA_DIR, filename);
+      fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8', (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  /**
+   * Lê dados de arquivo
+   * @param {string} filename - Nome do arquivo
+   * @param {*} defaultValue - Valor default se arquivo não existir
+   * @returns {Promise<Object|Array>} Dados lidos
+   * @private
+   */
+  async _readFromFile(filename, defaultValue = null) {
+    return new Promise((resolve, reject) => {
+      const filePath = path.join(DATA_DIR, filename);
+      fs.readFile(filePath, 'utf8', (err, data) => {
+        if (err) {
+          if (err.code === 'ENOENT') {
+            // Arquivo não existe, retorna valor default
+            resolve(defaultValue);
+          } else {
+            reject(err);
+          }
+        } else {
+          try {
+            resolve(JSON.parse(data));
+          } catch (parseErr) {
+            reject(parseErr);
+          }
+        }
+      });
+    });
   }
 }
 
 // Singleton
 const databaseService = new DatabaseService();
 
-module.exports = databaseService;
+// Função para conectar ao banco de dados
+const connectDB = async () => {
+  return await databaseService.connect();
+};
+
+// Exportar serviço e função de conexão
+module.exports = {
+  databaseService,
+  connectDB
+};

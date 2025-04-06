@@ -1,369 +1,406 @@
-// src/services/binanceService.js
+const axios = require('axios');
+const crypto = require('crypto');
+const querystring = require('querystring');
+const logger = require('../utils/logger');
+const config = require('../config/appConfig');
 
-// Importações
-import axios from 'axios';
-
-const BASE_URL = process.env.TEST_MODE === 'true' 
-  ? 'https://testnet.binance.vision' 
-  : 'https://api.binance.com';
-
-const WS_BASE_URL = process.env.TEST_MODE === 'true'
-  ? 'wss://testnet.binance.vision/ws'
-  : 'wss://stream.binance.com:9443/ws';
-
-// Chaves de API (em produção deveriam vir de variáveis de ambiente ou configuração segura)
-let apiKey = '';
-let apiSecret = '';
-
-/**
- * Inicializa o serviço com as chaves da API
- * @param {string} key - Chave da API Binance
- * @param {string} secret - Chave secreta da API Binance
- */
-export const initBinanceService = (key, secret) => {
-  apiKey = key;
-  apiSecret = secret;
-  console.log('Binance service initialized');
-  return testConnection();
-};
-
-/**
- * Testa a conexão com a API da Binance
- * @returns {Promise} Resultado do teste de conexão
- */
-export const testConnection = async () => {
-  try {
-    const response = await axios.get(`${BASE_URL}/api/v3/ping`, {
-      headers: { 'X-MBX-APIKEY': apiKey }
-    });
-    return { success: true, data: response.data };
-  } catch (error) {
-    console.error('Erro ao testar conexão com a Binance:', error);
-    return { success: false, error: error.message };
+class BinanceService {
+  constructor() {
+    this.apiKey = config.binance.apiKey;
+    this.apiSecret = config.binance.apiSecret;
+    this.baseUrl = config.binance.testMode 
+      ? 'https://testnet.binance.vision/api' 
+      : 'https://api.binance.com/api';
+    this.wsBaseUrl = config.binance.testMode 
+      ? 'wss://testnet.binance.vision/ws'
+      : 'wss://stream.binance.com:9443/ws';
+    
+    // API rate limiters
+    this.requestCount = 0;
+    this.lastRequestTime = Date.now();
+    this.requestQueue = [];
+    this.processing = false;
+    
+    // Initialize rate limiter
+    setInterval(() => {
+      this.requestCount = 0;
+      this.lastRequestTime = Date.now();
+    }, config.binance.rateLimitWindow);
   }
-};
-
-/**
- * Obtém informações da conta
- * @returns {Promise} Informações da conta
- */
-export const getAccountInfo = async () => {
-  try {
-    const timestamp = Date.now();
-    const signature = createSignature(`timestamp=${timestamp}`);
-    
-    const response = await axios.get(`${BASE_URL}/api/v3/account`, {
-      headers: { 'X-MBX-APIKEY': apiKey },
-      params: { timestamp, signature }
-    });
-    
-    return { success: true, data: response.data };
-  } catch (error) {
-    console.error('Erro ao obter informações da conta:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * Obtém o preço atual de um ou mais símbolos
- * @param {string|Array} symbols - Símbolo ou array de símbolos (ex: 'BTCUSDT')
- * @returns {Promise} Preços atuais
- */
-export const getTickerPrice = async (symbols) => {
-  try {
-    let url = `${BASE_URL}/api/v3/ticker/price`;
-    
-    if (symbols) {
-      if (Array.isArray(symbols)) {
-        const symbolsParam = symbols.join('","');
-        url = `${url}?symbols=["${symbolsParam}"]`;
-      } else {
-        url = `${url}?symbol=${symbols}`;
-      }
+  
+  /**
+   * Testa a conexão com a API da Binance
+   * @returns {Promise<Object>} Resultado do teste
+   */
+  async testConnection() {
+    try {
+      const response = await this._makeRequest('/v3/ping', 'GET');
+      return { success: true, data: response };
+    } catch (error) {
+      logger.error('Erro ao testar conexão com Binance:', error.message);
+      return { success: false, error: error.message };
     }
-    
-    const response = await axios.get(url);
-    return { success: true, data: response.data };
-  } catch (error) {
-    console.error('Erro ao obter preços:', error);
-    return { success: false, error: error.message };
   }
-};
-
-/**
- * Cria uma ordem de compra ou venda
- * @param {Object} orderParams - Parâmetros da ordem
- * @returns {Promise} Resultado da criação da ordem
- */
-export const createOrder = async (orderParams) => {
-  try {
-    const timestamp = Date.now();
-    const params = {
-      ...orderParams,
-      timestamp,
-      recvWindow: 5000
-    };
-    
-    // Cria a string de consulta para assinatura
-    const queryString = Object.keys(params)
-      .map(key => `${key}=${params[key]}`)
-      .join('&');
-      
-    const signature = createSignature(queryString);
-    
-    const response = await axios.post(`${BASE_URL}/api/v3/order`, null, {
-      headers: { 'X-MBX-APIKEY': apiKey },
-      params: { ...params, signature }
-    });
-    
-    return { success: true, data: response.data };
-  } catch (error) {
-    console.error('Erro ao criar ordem:', error);
-    return { success: false, error: error.message };
+  
+  /**
+   * Obtém informações da conta
+   * @returns {Promise<Object>} Informações da conta
+   */
+  async getAccountInfo() {
+    try {
+      const response = await this._makeRequest('/v3/account', 'GET', {}, true);
+      return { success: true, data: response };
+    } catch (error) {
+      logger.error('Erro ao obter informações da conta:', error.message);
+      return { success: false, error: error.message };
+    }
   }
-};
-
-/**
- * Cancela uma ordem
- * @param {string} symbol - Símbolo da moeda (ex: 'BTCUSDT')
- * @param {number} orderId - ID da ordem
- * @returns {Promise} Resultado do cancelamento
- */
-export const cancelOrder = async (symbol, orderId) => {
-  try {
-    const timestamp = Date.now();
-    const queryString = `symbol=${symbol}&orderId=${orderId}&timestamp=${timestamp}`;
-    const signature = createSignature(queryString);
-    
-    const response = await axios.delete(`${BASE_URL}/api/v3/order`, {
-      headers: { 'X-MBX-APIKEY': apiKey },
-      params: {
+  
+  /**
+   * Obtém preço atual de um par
+   * @param {string} symbol - Par de trading
+   * @returns {Promise<Object>} Preço atual
+   */
+  async getTickerPrice(symbol) {
+    try {
+      const params = symbol ? { symbol } : {};
+      const response = await this._makeRequest('/v3/ticker/price', 'GET', params);
+      return { success: true, data: response };
+    } catch (error) {
+      logger.error(`Erro ao obter preço para ${symbol}:`, error.message);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  /**
+   * Obtém profundidade de mercado
+   * @param {string} symbol - Par de trading
+   * @param {number} limit - Limite de níveis (default: 100, max: 5000)
+   * @returns {Promise<Object>} Profundidade de mercado
+   */
+  async getOrderBook(symbol, limit = 100) {
+    try {
+      const params = { symbol, limit };
+      const response = await this._makeRequest('/v3/depth', 'GET', params);
+      return { success: true, data: response };
+    } catch (error) {
+      logger.error(`Erro ao obter order book para ${symbol}:`, error.message);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  /**
+   * Obtém dados de candles
+   * @param {string} symbol - Par de trading
+   * @param {string} interval - Intervalo (1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M)
+   * @param {Object} options - Opções adicionais
+   * @returns {Promise<Object>} Dados de candles
+   */
+  async getKlines(symbol, interval, options = {}) {
+    try {
+      const params = {
         symbol,
-        orderId,
-        timestamp,
-        signature
+        interval,
+        limit: options.limit || 500,
+        startTime: options.startTime,
+        endTime: options.endTime
+      };
+      
+      const response = await this._makeRequest('/v3/klines', 'GET', params);
+      
+      // Formatar resposta para objetos mais amigáveis
+      const formattedCandles = response.map(candle => ({
+        openTime: candle[0],
+        open: parseFloat(candle[1]),
+        high: parseFloat(candle[2]),
+        low: parseFloat(candle[3]),
+        close: parseFloat(candle[4]),
+        volume: parseFloat(candle[5]),
+        closeTime: candle[6],
+        quoteVolume: parseFloat(candle[7]),
+        trades: candle[8],
+        buyBaseVolume: parseFloat(candle[9]),
+        buyQuoteVolume: parseFloat(candle[10]),
+        ignored: candle[11]
+      }));
+      
+      return { success: true, data: formattedCandles };
+    } catch (error) {
+      logger.error(`Erro ao obter candles para ${symbol}:`, error.message);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  /**
+   * Cria uma ordem
+   * @param {Object} orderParams - Parâmetros da ordem
+   * @returns {Promise<Object>} Resultado da criação da ordem
+   */
+  async createOrder(orderParams) {
+    try {
+      const response = await this._makeRequest('/v3/order', 'POST', orderParams, true);
+      return { success: true, data: response };
+    } catch (error) {
+      logger.error('Erro ao criar ordem:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  /**
+   * Cria uma ordem OCO (One Cancels the Other)
+   * @param {Object} orderParams - Parâmetros da ordem
+   * @returns {Promise<Object>} Resultado da criação da ordem OCO
+   */
+  async createOcoOrder(orderParams) {
+    try {
+      const response = await this._makeRequest('/v3/order/oco', 'POST', orderParams, true);
+      return { success: true, data: response };
+    } catch (error) {
+      logger.error('Erro ao criar ordem OCO:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  /**
+   * Cancela uma ordem
+   * @param {string} symbol - Par de trading
+   * @param {string} orderId - ID da ordem
+   * @returns {Promise<Object>} Resultado do cancelamento
+   */
+  async cancelOrder(symbol, orderId) {
+    try {
+      const params = { symbol, orderId };
+      const response = await this._makeRequest('/v3/order', 'DELETE', params, true);
+      return { success: true, data: response };
+    } catch (error) {
+      logger.error(`Erro ao cancelar ordem ${orderId}:`, error.message);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  /**
+   * Cancela todas as ordens de um símbolo
+   * @param {string} symbol - Par de trading
+   * @returns {Promise<Object>} Resultado do cancelamento
+   */
+  async cancelAllOrders(symbol) {
+    try {
+      const params = { symbol };
+      const response = await this._makeRequest('/v3/openOrders', 'DELETE', params, true);
+      return { success: true, data: response };
+    } catch (error) {
+      logger.error(`Erro ao cancelar todas as ordens para ${symbol}:`, error.message);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  /**
+   * Obtém status de uma ordem
+   * @param {string} symbol - Par de trading
+   * @param {string} orderId - ID da ordem
+   * @returns {Promise<Object>} Status da ordem
+   */
+  async getOrder(symbol, orderId) {
+    try {
+      const params = { symbol, orderId };
+      const response = await this._makeRequest('/v3/order', 'GET', params, true);
+      return { success: true, data: response };
+    } catch (error) {
+      logger.error(`Erro ao obter status da ordem ${orderId}:`, error.message);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  /**
+   * Obtém todas as ordens abertas
+   * @param {string} symbol - Par de trading (opcional)
+   * @returns {Promise<Object>} Lista de ordens abertas
+   */
+  async getOpenOrders(symbol = null) {
+    try {
+      const params = symbol ? { symbol } : {};
+      const response = await this._makeRequest('/v3/openOrders', 'GET', params, true);
+      return { success: true, data: response };
+    } catch (error) {
+      logger.error('Erro ao obter ordens abertas:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  /**
+   * Cria um WebSocket para atualizações de profundidade
+   * @param {string} symbol - Par de trading
+   * @param {Function} callback - Função de callback
+   * @returns {WebSocket} Instância do WebSocket
+   */
+  createDepthWebSocket(symbol, callback) {
+    try {
+      const lowerSymbol = symbol.toLowerCase();
+      const ws = new WebSocket(`${this.wsBaseUrl}/${lowerSymbol}@depth`);
+      
+      ws.onopen = () => {
+        logger.info(`WebSocket de profundidade para ${symbol} aberto`);
+      };
+      
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        callback(data);
+      };
+      
+      ws.onerror = (error) => {
+        logger.error(`Erro no WebSocket de profundidade para ${symbol}:`, error);
+      };
+      
+      ws.onclose = () => {
+        logger.info(`WebSocket de profundidade para ${symbol} fechado`);
+      };
+      
+      return ws;
+    } catch (error) {
+      logger.error(`Erro ao criar WebSocket de profundidade para ${symbol}:`, error.message);
+      throw error;
+    }
+  }
+  
+  /**
+   * Cria um WebSocket para atualizações de candles
+   * @param {string} symbol - Par de trading
+   * @param {string} interval - Intervalo 
+   * @param {Function} callback - Função de callback
+   * @returns {WebSocket} Instância do WebSocket
+   */
+  createKlineWebSocket(symbol, interval, callback) {
+    try {
+      const lowerSymbol = symbol.toLowerCase();
+      const ws = new WebSocket(`${this.wsBaseUrl}/${lowerSymbol}@kline_${interval}`);
+      
+      ws.onopen = () => {
+        logger.info(`WebSocket de candles para ${symbol} aberto`);
+      };
+      
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        callback(data);
+      };
+      
+      ws.onerror = (error) => {
+        logger.error(`Erro no WebSocket de candles para ${symbol}:`, error);
+      };
+      
+      ws.onclose = () => {
+        logger.info(`WebSocket de candles para ${symbol} fechado`);
+      };
+      
+      return ws;
+    } catch (error) {
+      logger.error(`Erro ao criar WebSocket de candles para ${symbol}:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Realiza uma requisição para a API da Binance
+   * @param {string} endpoint - Endpoint da API
+   * @param {string} method - Método HTTP
+   * @param {Object} params - Parâmetros da requisição
+   * @param {boolean} signed - Se a requisição precisa ser assinada
+   * @returns {Promise<Object>} Resposta da API
+   * @private
+   */
+  async _makeRequest(endpoint, method, params = {}, signed = false) {
+    return new Promise((resolve, reject) => {
+      // Adicionar requisição à fila
+      this.requestQueue.push({
+        endpoint,
+        method,
+        params,
+        signed,
+        resolve,
+        reject
+      });
+      
+      // Processar fila se não estiver processando
+      if (!this.processing) {
+        this._processQueue();
       }
     });
-    
-    return { success: true, data: response.data };
-  } catch (error) {
-    console.error('Erro ao cancelar ordem:', error);
-    return { success: false, error: error.message };
   }
-};
-
-/**
- * Obtém o histórico de ordens
- * @param {string} symbol - Símbolo da moeda (ex: 'BTCUSDT')
- * @param {Object} options - Opções adicionais (limit, fromId, etc)
- * @returns {Promise} Histórico de ordens
- */
-export const getOrderHistory = async (symbol, options = {}) => {
-  try {
-    const timestamp = Date.now();
-    const params = {
-      symbol,
-      timestamp,
-      ...options
-    };
+  
+  /**
+   * Processa a fila de requisições respeitando os limites de rate
+   * @private
+   */
+  async _processQueue() {
+    if (this.requestQueue.length === 0 || this.processing) {
+      return;
+    }
     
-    const queryString = Object.keys(params)
-      .map(key => `${key}=${params[key]}`)
-      .join('&');
+    this.processing = true;
+    
+    try {
+      // Verificar limites de rate
+      if (this.requestCount >= config.binance.rateLimit) {
+        const waitTime = config.binance.rateLimitWindow - (Date.now() - this.lastRequestTime);
+        if (waitTime > 0) {
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+        this.requestCount = 0;
+      }
       
-    const signature = createSignature(queryString);
-    
-    const response = await axios.get(`${BASE_URL}/api/v3/allOrders`, {
-      headers: { 'X-MBX-APIKEY': apiKey },
-      params: { ...params, signature }
-    });
-    
-    return { success: true, data: response.data };
-  } catch (error) {
-    console.error('Erro ao obter histórico de ordens:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * Obtém dados de candle (OHLCV)
- * @param {string} symbol - Símbolo da moeda (ex: 'BTCUSDT')
- * @param {string} interval - Intervalo (1m, 5m, 15m, 1h, etc)
- * @param {Object} options - Opções adicionais (limit, startTime, endTime)
- * @returns {Promise} Dados de candle
- */
-export const getKlines = async (symbol, interval, options = {}) => {
-  try {
-    const params = {
-      symbol,
-      interval,
-      ...options
-    };
-    
-    const response = await axios.get(`${BASE_URL}/api/v3/klines`, { params });
-    
-    // Formata os dados para um formato mais amigável
-    const formattedData = response.data.map(candle => ({
-      time: candle[0],
-      open: parseFloat(candle[1]),
-      high: parseFloat(candle[2]),
-      low: parseFloat(candle[3]),
-      close: parseFloat(candle[4]),
-      volume: parseFloat(candle[5]),
-      closeTime: candle[6],
-      quoteAssetVolume: parseFloat(candle[7]),
-      trades: candle[8],
-      takerBuyBaseAssetVolume: parseFloat(candle[9]),
-      takerBuyQuoteAssetVolume: parseFloat(candle[10])
-    }));
-    
-    return { success: true, data: formattedData };
-  } catch (error) {
-    console.error('Erro ao obter dados de candle:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-// WebSocket connections
-
-/**
- * Cria uma conexão WebSocket para atualizações de preço em tempo real
- * @param {string|Array} symbols - Símbolo ou array de símbolos (ex: 'BTCUSDT')
- * @param {Function} onMessage - Callback para mensagens recebidas
- * @returns {WebSocket} Conexão WebSocket
- */
-export const createTickerWebSocket = (symbols, onMessage) => {
-  let streamName;
-  
-  if (Array.isArray(symbols)) {
-    // Para múltiplos símbolos, usamos streams combinados
-    const streams = symbols.map(s => `${s.toLowerCase()}@ticker`).join('/');
-    streamName = `stream?streams=${streams}`;
-  } else {
-    // Para um único símbolo
-    streamName = `${symbols.toLowerCase()}@ticker`;
-  }
-  
-  const ws = new WebSocket(`${WS_BASE_URL}/${streamName}`);
-  
-  ws.onopen = () => {
-    console.log('Conexão WebSocket estabelecida para ticker');
-  };
-  
-  ws.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      onMessage(data);
+      const request = this.requestQueue.shift();
+      this.requestCount++;
+      
+      let fullUrl = this.baseUrl + request.endpoint;
+      let headers = { 'X-MBX-APIKEY': this.apiKey };
+      let data = null;
+      
+      if (request.signed) {
+        // Adicionar timestamp para requisições assinadas
+        request.params.timestamp = Date.now();
+        
+        // Criar assinatura
+        const queryString = querystring.stringify(request.params);
+        request.params.signature = crypto
+          .createHmac('sha256', this.apiSecret)
+          .update(queryString)
+          .digest('hex');
+      }
+      
+      if (request.method === 'GET') {
+        if (Object.keys(request.params).length > 0) {
+          fullUrl += '?' + querystring.stringify(request.params);
+        }
+      } else {
+        data = request.params;
+      }
+      
+      const response = await axios({
+        method: request.method,
+        url: fullUrl,
+        headers,
+        data: request.method !== 'GET' ? request.params : null
+      });
+      
+      request.resolve(response.data);
     } catch (error) {
-      console.error('Erro ao processar mensagem WebSocket:', error);
+      const request = this.requestQueue[0];
+      if (request) {
+        request.reject(error);
+      } else {
+        logger.error('Erro ao processar fila de requisições:', error);
+      }
+    } finally {
+      this.processing = false;
+      
+      // Continuar processando a fila se houver mais requisições
+      if (this.requestQueue.length > 0) {
+        setTimeout(() => this._processQueue(), 50); // Pequeno delay para não sobrecarregar
+      }
     }
-  };
-  
-  ws.onerror = (error) => {
-    console.error('Erro na conexão WebSocket:', error);
-  };
-  
-  ws.onclose = () => {
-    console.log('Conexão WebSocket fechada para ticker');
-  };
-  
-  return ws;
-};
+  }
+}
 
-/**
- * Cria uma conexão WebSocket para atualizações de candle em tempo real
- * @param {string} symbol - Símbolo da moeda (ex: 'BTCUSDT')
- * @param {string} interval - Intervalo (1m, 5m, 15m, 1h, etc)
- * @param {Function} onMessage - Callback para mensagens recebidas
- * @returns {WebSocket} Conexão WebSocket
- */
-export const createKlineWebSocket = (symbol, interval, onMessage) => {
-  const streamName = `${symbol.toLowerCase()}@kline_${interval}`;
-  const ws = new WebSocket(`${WS_BASE_URL}/${streamName}`);
-  
-  ws.onopen = () => {
-    console.log(`Conexão WebSocket estabelecida para candles ${symbol} ${interval}`);
-  };
-  
-  ws.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      onMessage(data);
-    } catch (error) {
-      console.error('Erro ao processar mensagem WebSocket:', error);
-    }
-  };
-  
-  ws.onerror = (error) => {
-    console.error('Erro na conexão WebSocket:', error);
-  };
-  
-  ws.onclose = () => {
-    console.log(`Conexão WebSocket fechada para candles ${symbol} ${interval}`);
-  };
-  
-  return ws;
-};
+// Singleton
+const binanceService = new BinanceService();
 
-/**
- * Cria uma conexão WebSocket para livro de ordens em tempo real
- * @param {string} symbol - Símbolo da moeda (ex: 'BTCUSDT')
- * @param {Function} onMessage - Callback para mensagens recebidas
- * @param {number} levels - Número de níveis de profundidade (5, 10, 20)
- * @returns {WebSocket} Conexão WebSocket
- */
-export const createDepthWebSocket = (symbol, onMessage, levels = 20) => {
-  const streamName = `${symbol.toLowerCase()}@depth${levels}`;
-  const ws = new WebSocket(`${WS_BASE_URL}/${streamName}`);
-  
-  ws.onopen = () => {
-    console.log(`Conexão WebSocket estabelecida para profundidade ${symbol}`);
-  };
-  
-  ws.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      onMessage(data);
-    } catch (error) {
-      console.error('Erro ao processar mensagem WebSocket:', error);
-    }
-  };
-  
-  ws.onerror = (error) => {
-    console.error('Erro na conexão WebSocket:', error);
-  };
-  
-  ws.onclose = () => {
-    console.log(`Conexão WebSocket fechada para profundidade ${symbol}`);
-  };
-  
-  return ws;
-};
-
-// Funções auxiliares
-
-/**
- * Cria uma assinatura HMAC para autenticação
- * @param {string} queryString - String de consulta a ser assinada
- * @returns {string} Assinatura HMAC
- */
-const createSignature = (queryString) => {
-  // Em um ambiente real, você usaria uma biblioteca como crypto-js
-  // Para simplificar, estamos simulando a assinatura
-  console.log(`Assinando: ${queryString}`);
-  return 'simulated_signature_for_demo_purposes_only';
-};
-
-export default {
-  initBinanceService,
-  testConnection,
-  getAccountInfo,
-  getTickerPrice,
-  createOrder,
-  cancelOrder,
-  getOrderHistory,
-  getKlines,
-  createTickerWebSocket,
-  createKlineWebSocket,
-  createDepthWebSocket
-};
+module.exports = binanceService;

@@ -25,14 +25,38 @@ class PortfolioManager {
         weeklyProfit: 0,
         weeklyProfitPercentage: 0,
         monthlyProfit: 0,
-        monthlyProfitPercentage: 0
+        monthlyProfitPercentage: 0,
+        drawdown: {
+          current: 0,
+          max: 0,
+          periods: []
+        },
+        sharpeRatio: 0,
+        winRate: 0,
+        profitFactor: 0
       },
+      riskMetrics: {
+        maxDrawdown: 0,
+        currentDrawdown: 0,
+        volatility: 0,
+        valueAtRisk: 0,
+        riskRewardRatio: 0,
+        exposurePercentage: 0
+      },
+      strategyAllocation: {},
+      allocatedBalances: {},
+      openOrders: [],
+      recentTrades: [],
       lastUpdated: null
     };
     
     this.tradeHistory = [];
+    this.strategyPerformance = {};  // Desempenho por estratégia
     this.performanceSnapshots = [];
     this.priceCache = {};
+    this.dailyReturns = [];         // Para cálculos de volatilidade e Sharpe Ratio
+    this.pairAnalytics = {};        // Análise por par de moedas
+    this.customAlerts = [];         // Alertas personalizados
     
     logger.info('Gerenciador de Portfólio inicializado');
   }

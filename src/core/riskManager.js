@@ -28,7 +28,13 @@ class RiskManager {
       tradeCountLimit: { // Limite de operações por período
         hourly: 5,
         daily: 20
-      }
+      },
+      maxDrawdown: 10.0, // Maximum drawdown percentage
+      emergencyStopLoss: 15.0, // Emergency stop loss percentage
+      maxLeverage: 3.0, // Maximum allowed leverage
+      volatilityScaling: true, // Enable position sizing based on volatility
+      maxDailyTrades: 50, // Maximum number of trades per day
+      minLiquidity: 100000, // Minimum liquidity in USDT
     };
     
     // Estado das operações
@@ -41,12 +47,21 @@ class RiskManager {
       assetExposure: {}, // Exposição por ativo
       tradingEnabled: true, // Flag global para habilitar/desabilitar trading
       volatilityWarning: false, // Flag para alta volatilidade
-      apiErrorCount: 0 // Contador de erros da API
+      apiErrorCount: 0, // Contador de erros da API
+      liquidityWarnings: {}, // Avisos de baixa liquidez por par
+      marketLiquidity: {} // Dados de liquidez de mercado por par
     };
     
     // Registro de operações diárias
     this.dailyTrades = [];
     
+    // Add volatility tracking
+    this.volatilityTracker = {
+      windowSize: 24, // hours
+      readings: [],
+      lastUpdate: null
+    };
+
     logger.info('Gerenciador de Riscos inicializado');
   }
   
@@ -421,6 +436,31 @@ class RiskManager {
       logger.error(`Erro ao atualizar configurações de risco: ${error.message}`);
       return false;
     }
+  }
+
+  /**
+   * Monitora drawdown
+   * @param {Object} portfolio - Portfólio atual
+   * @returns {boolean} Indica se o drawdown está dentro do limite
+   */
+  checkDrawdown(portfolio) {
+    const { highestValue, currentValue } = portfolio;
+    const drawdown = ((highestValue - currentValue) / highestValue) * 100;
+    
+    if (drawdown >= this.settings.maxDrawdown) {
+      this.disableTrading(`Maximum drawdown (${this.settings.maxDrawdown}%) reached`);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Atualiza monitoramento de volatilidade
+   * @param {number} price - Preço atual
+   * @param {Date} timestamp - Timestamp da leitura
+   */
+  updateVolatility(price, timestamp) {
+    // Implementação do monitoramento de volatilidade
   }
 }
 

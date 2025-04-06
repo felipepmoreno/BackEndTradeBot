@@ -5,6 +5,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const config = require('./src/config/appConfig');
 const { connectDB } = require('./src/services/databaseService');
 const routes = require('./src/api/routes');
 const { initWsServer } = require('./src/utils/webSocketServer');
@@ -19,7 +20,12 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middlewares
-app.use(cors());
+// Configurar CORS para permitir conexões do frontend
+app.use(cors({
+  origin: config.app.corsOrigin,
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
 // Rotas API
@@ -71,10 +77,33 @@ process.on('unhandledRejection', (reason, promise) => {
   logger.error('Rejeição não tratada em:', promise, 'razão:', reason);
 });
 
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM recebido.');
-  server.close(() => {
+// Adiciona desligamento gracioso
+const gracefulShutdown = async () => {
+  logger.info('Initiating graceful shutdown...');
+  
+  // Fecha conexões WebSocket
+  wss.clients.forEach(client => {
+    client.terminate();
+  });
+  
+  // Fecha servidor HTTP
+  server.close(async () => {
     logger.info('Servidor HTTP fechado.');
+    
+    // Fecha conexão com o banco de dados, se habilitado
+    if (config.database.enabled) {
+      await connectDB.disconnect();
+    }
+    
     process.exit(0);
   });
-});
+  
+  // Força saída após timeout
+  setTimeout(() => {
+    logger.error('Não foi possível fechar conexões a tempo, encerrando forçadamente');
+    process.exit(1);
+  }, 30000);
+};
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
