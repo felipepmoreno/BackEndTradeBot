@@ -1,43 +1,59 @@
 const winston = require('winston');
 const path = require('path');
-const fs = require('fs');
-const config = require('../config/appConfig');
 
-// Ensure logs directory exists
-const logDir = path.dirname(config.logging.file);
-if (!fs.existsSync(logDir)) {
-  fs.mkdirSync(logDir, { recursive: true });
-}
+// Configuração dos níveis de log
+const levels = {
+  error: 0,
+  warn: 1,
+  info: 2,
+  http: 3,
+  debug: 4,
+};
 
-// Define log format
-const logFormat = winston.format.combine(
-  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-  winston.format.printf(({ timestamp, level, message, ...rest }) => {
-    const restString = Object.keys(rest).length ? JSON.stringify(rest, null, 2) : '';
-    return `[${timestamp}] ${level.toUpperCase()}: ${message} ${restString}`;
-  })
+// Configuração das cores para cada nível de log
+const colors = {
+  error: 'red',
+  warn: 'yellow',
+  info: 'green',
+  http: 'magenta',
+  debug: 'blue',
+};
+
+// Adiciona cores aos níveis
+winston.addColors(colors);
+
+// Formatos de log
+const format = winston.format.combine(
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
+  winston.format.colorize({ all: true }),
+  winston.format.printf(
+    (info) => `${info.timestamp} ${info.level}: ${info.message}`,
+  ),
 );
 
-// Create logger instance
+// Define os transportes (onde os logs serão armazenados)
+const transports = [
+  // Console para todos os logs
+  new winston.transports.Console(),
+  
+  // Arquivo para erros
+  new winston.transports.File({
+    filename: path.join(__dirname, '../../logs/error.log'),
+    level: 'error',
+  }),
+  
+  // Arquivo para todos os logs
+  new winston.transports.File({ 
+    filename: path.join(__dirname, '../../logs/combined.log') 
+  }),
+];
+
+// Cria o logger
 const logger = winston.createLogger({
-  level: config.logging.level,
-  format: logFormat,
-  transports: [
-    // Console output
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        logFormat
-      )
-    }),
-    // File output
-    new winston.transports.File({
-      filename: config.logging.file,
-      maxsize: 5242880, // 5MB
-      maxFiles: 5
-    })
-  ],
-  exitOnError: false
+  level: process.env.LOG_LEVEL || 'info',
+  levels,
+  format,
+  transports,
 });
 
 module.exports = logger;
