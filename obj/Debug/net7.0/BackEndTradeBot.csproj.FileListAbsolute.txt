@@ -1,0 +1,8 @@
+C:\Users\felip\OneDrive\Área de Trabalho\Felipe\Repositórios\TradingBotBinance\BackEndTradeBot\obj\Debug\net7.0\BackEndTradeBot.csproj.AssemblyReference.cache
+C:\Users\felip\OneDrive\Área de Trabalho\Felipe\Repositórios\TradingBotBinance\BackEndTradeBot\obj\Debug\net7.0\BackEndTradeBot.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\felip\OneDrive\Área de Trabalho\Felipe\Repositórios\TradingBotBinance\BackEndTradeBot\obj\Debug\net7.0\BackEndTradeBot.AssemblyInfoInputs.cache
+C:\Users\felip\OneDrive\Área de Trabalho\Felipe\Repositórios\TradingBotBinance\BackEndTradeBot\obj\Debug\net7.0\BackEndTradeBot.AssemblyInfo.cs
+C:\Users\felip\OneDrive\Área de Trabalho\Felipe\Repositórios\TradingBotBinance\BackEndTradeBot\obj\Debug\net7.0\BackEndTradeBot.csproj.CoreCompileInputs.cache
+C:\Users\felip\OneDrive\Área de Trabalho\Felipe\Repositórios\TradingBotBinance\BackEndTradeBot\obj\Debug\net7.0\BackEndTradeBot.MvcApplicationPartsAssemblyInfo.cs
+C:\Users\felip\OneDrive\Área de Trabalho\Felipe\Repositórios\TradingBotBinance\BackEndTradeBot\obj\Debug\net7.0\BackEndTradeBot.MvcApplicationPartsAssemblyInfo.cache
+C:\Users\felip\OneDrive\Área de Trabalho\Felipe\Repositórios\TradingBotBinance\BackEndTradeBot\obj\Debug\net7.0\BackEndTradeBot.sourcelink.json

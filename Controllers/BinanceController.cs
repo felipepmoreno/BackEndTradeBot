@@ -32,6 +32,31 @@ namespace TradingBotApi.Controllers
             }
         }
 
+        /// <summary>
+        /// Gets the current status of the Binance connection
+        /// </summary>
+        /// <returns>Connection status information</returns>
+        [HttpGet("status")]
+        public async Task<IActionResult> GetStatus([FromQuery] string? apiKey = null, [FromQuery] string? apiSecret = null)
+        {
+            try
+            {
+                BinanceConfig? config = null;
+                if (!string.IsNullOrEmpty(apiKey) && !string.IsNullOrEmpty(apiSecret))
+                {
+                    config = new BinanceConfig { ApiKey = apiKey, ApiSecret = apiSecret };
+                }
+                
+                var status = await _binanceService.GetStatus(config);
+                return Ok(status);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking Binance status");
+                return StatusCode(500, new { Error = $"Error checking status: {ex.Message}" });
+            }
+        }
+
         [HttpGet("price/{symbol}")]
         public async Task<IActionResult> GetPrice(string symbol, [FromQuery] string apiKey, [FromQuery] string apiSecret)
         {
@@ -45,6 +70,46 @@ namespace TradingBotApi.Controllers
             {
                 _logger.LogError(ex, "Error fetching price for {Symbol}", symbol);
                 return StatusCode(500, new { Error = $"Error fetching price: {ex.Message}" });
+            }
+        }
+
+        /// <summary>
+        /// Gets a list of all available trading symbols from Binance
+        /// </summary>
+        /// <returns>List of available trading symbols</returns>
+        [HttpGet("symbols")]
+        public async Task<IActionResult> GetSymbols([FromQuery] string apiKey, [FromQuery] string apiSecret)
+        {
+            try
+            {
+                var config = new BinanceConfig { ApiKey = apiKey, ApiSecret = apiSecret };
+                var symbols = await _binanceService.GetAvailableSymbols(config);
+                return Ok(new { Symbols = symbols, Count = symbols.Count(), Timestamp = DateTime.UtcNow });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching available symbols");
+                return StatusCode(500, new { Error = $"Error fetching symbols: {ex.Message}" });
+            }
+        }
+
+        /// <summary>
+        /// Gets the current server time from Binance
+        /// </summary>
+        /// <returns>Current server time in UTC</returns>
+        [HttpGet("server-time")]
+        public async Task<IActionResult> GetServerTime([FromQuery] string apiKey, [FromQuery] string apiSecret)
+        {
+            try
+            {
+                var config = new BinanceConfig { ApiKey = apiKey, ApiSecret = apiSecret };
+                var serverTime = await _binanceService.GetServerTime(config);
+                return Ok(new { ServerTime = serverTime, LocalTime = DateTime.UtcNow });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching server time");
+                return StatusCode(500, new { Error = $"Error fetching server time: {ex.Message}" });
             }
         }
     }
