@@ -15,6 +15,8 @@ from datetime import datetime
 from app.api.health import router as health_router
 from app.api.binance import router as binance_router
 from app.api.wallet import router as wallet_router
+from app.api.trading import router as trading_router
+from app.api.bot import router as bot_router
 
 # Criação da aplicação FastAPI
 app = FastAPI(
@@ -36,6 +38,8 @@ app.add_middleware(
 app.include_router(health_router, prefix="/api", tags=["Health Check"])
 app.include_router(binance_router, prefix="/api/binance", tags=["Binance"])
 app.include_router(wallet_router, prefix="/api/wallet", tags=["Wallet"])
+app.include_router(trading_router, prefix="/api/trading", tags=["Trading"])
+app.include_router(bot_router, prefix="/api/bot", tags=["Bot"])
 
 @app.get("/", tags=["Root"])
 async def root():
