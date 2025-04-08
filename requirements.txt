@@ -1,0 +1,11 @@
+fastapi>=0.95.0
+uvicorn>=0.21.1
+python-binance>=1.0.17
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+httpx>=0.24.0
+pytest>=7.3.1
+python-jose>=3.3.0
+passlib>=1.7.4
+cryptography>=38.0.0
